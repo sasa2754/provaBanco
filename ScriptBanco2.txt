@@ -1,0 +1,108 @@
+CREATE TABLE funcionarios (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nome VARCHAR(100) NOT NULL,
+    cargo VARCHAR(50) NOT NULL,
+    salario DECIMAL(10, 2) NOT NULL,
+    departamento VARCHAR(50) NOT NULL,
+    data_contratacao DATE NOT NULL
+)default charset=utf8mb4;
+
+CREATE TABLE historico_cargos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    funcionario_id INT,
+    cargo_anterior VARCHAR(50),
+    cargo_novo VARCHAR(50),
+    salario_anterior DECIMAL(10, 2),
+    salario_novo DECIMAL(10, 2),
+    data_mudanca TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (funcionario_id) REFERENCES funcionarios(id)
+)default charset=utf8mb4;
+
+CREATE TABLE aumento_salario_audit (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    funcionario_id INT,
+    salario_antigo DECIMAL(10, 2),
+    salario_novo DECIMAL(10, 2),
+    data_aumento TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (funcionario_id) REFERENCES funcionarios(id)
+)default charset=utf8mb4;
+
+CREATE TABLE departamentos_estatisticas (
+    departamento VARCHAR(50) PRIMARY KEY,
+    total_funcionarios INT DEFAULT 0
+)default charset=utf8mb4;
+
+
+-- Trigger para inserir na tabela aumento_salario_audit quando o salario de um funcionário é atualizado
+DELIMITER //
+CREATE TRIGGER AumentoSalario
+BEFORE UPDATE ON funcionarios
+FOR EACH ROW
+BEGIN
+	INSERT INTO aumento_salario_audit values (default, NEW.id, OLD.salario, NEW.salario, now());
+END;
+//
+DELIMITER ;
+
+-- Trigger para inserir na tabela de historico_cargos quando o cargo de um funcionário é alterado
+DELIMITER //
+CREATE TRIGGER AlterarCargo
+BEFORE UPDATE ON funcionarios
+FOR EACH ROW
+BEGIN
+	INSERT INTO historico_cargos values (default, NEW.id, OLD.cargo, NEW.cargo, OLD.salario, NEW.salario, now());
+END;
+//
+DELIMITER ;
+
+insert into departamentos_estatisticas values ('ETS', 0), ('SAP', 0), ('BDO', 0);
+
+-- Trigger para inserir os dados na tabela departamentos_estatisticas quando um funcionário é removido
+DELIMITER //
+CREATE TRIGGER deleteEstatisticas
+BEFORE DELETE ON funcionarios
+FOR EACH ROW
+BEGIN
+	 -- Conferindo se o departamento já existe na tabela
+	IF EXISTS (
+		SELECT
+			departamento
+        FROM departamentos_estatisticas D
+        WHERE D.departamento = OLD.Departamento
+    ) THEN -- Se existir, ele da update nos dados daquele departamento, mas antes cria uma variável que contém o departamento certo
+		SET @Departamento = (SELECT departamento FROM departamentos_estatisticas D WHERE D.departamento = OLD.Departamento);
+		UPDATE departamentos_estatisticas SET total_funcionarios=(total_funcionarios - 1) WHERE departamento = @Departamento;
+	ELSE -- Se não existir, cria um novo dado na tabela, começando com 0
+		INSERT INTO departamentos_estatisticas values (default, OLD.departamento,0);
+	END IF;
+END;
+//
+DELIMITER ;
+
+ -- Trigger para inserir os dados na tabela departamentos_estatisticas quando um funcionário é adicionado
+DELIMITER //
+CREATE TRIGGER insertEstatisticas
+BEFORE INSERT ON funcionarios
+FOR EACH ROW
+BEGIN
+	 -- Conferindo se o departamento já existe na tabela
+	IF EXISTS (
+		SELECT
+			departamento
+        FROM departamentos_estatisticas D
+        WHERE D.departamento = NEW.departamento
+    ) THEN -- Se existir, ele da update nos dados daquele departamento, mas antes cria uma variável que contém o departamento certo
+		SET @Departamento = (SELECT departamento FROM departamentos_estatisticas D WHERE D.departamento = NEW.departamento);
+		UPDATE departamentos_estatisticas SET total_funcionarios=(total_funcionarios +1) WHERE departamento = @Departamento;
+	ELSE -- Se não existir, cria um novo dado na tabela, começando com 0
+		INSERT INTO departamentos_estatisticas values (default, NEW.departamento, 0);
+	END IF;
+END;
+//
+DELIMITER ;
+
+
+
+
+
+
