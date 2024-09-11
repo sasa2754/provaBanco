@@ -1,0 +1,231 @@
+create database provaSenai;
+use provaSenai;
+
+create table tb_Permissao (
+	IDPermissao int not null primary key auto_increment,
+    Descricao varchar(255) not null,
+    Nivel int not null
+)default charset=utf8mb4;
+
+create table tb_Funcionario (
+	IDFuncionario int not null primary key auto_increment,
+	Nome varchar(255) not null,
+	CPF varchar(11) not null,
+    IDPermissao int not null,
+    foreign key (IDPermissao) references tb_Permissao(IDPermissao)
+)default charset=utf8mb4;
+
+create table tb_Produto (
+	IDProduto int not null primary key auto_increment,
+    Nome varchar(255) not null,
+    Disponivel bit not null,
+    DataInsert datetime not null,
+    IDFuncionario int not null,
+    foreign key (IDFuncionario) references tb_Funcionario(IDFuncionario)
+)default charset=utf8mb4;
+
+create table tb_Vendas (
+	IDVendas int not null primary key auto_increment,
+    Qtd int not null,
+    IDProduto int not null,
+    IDFuncionario int not null,
+    foreign key (IDProduto) references tb_Produto(IDProduto),
+    foreign key (IDFuncionario) references tb_Funcionario(IDFuncionario)
+)default charset=utf8mb4;
+
+create table tb_Notificacao (
+	IDNotificacao int not null primary key auto_increment,
+    Mensagem varchar(255)
+)default charset=utf8mb4;
+
+
+drop table tb_Vendas;
+drop table tb_Produto;
+
+insert into tb_Permissao values (default, 'Básico', 1), (default, 'Melhorzinho', 2), (default, 'Médio', 3), (default, 'Bom', 4), (default, 'Muito incrível', 5);
+insert into tb_Funcionario values (default, 'Sabrina', '12345678910', 5), (default, 'Andrey', '10987654321', 4), (default, 'Fernando', '13579864201', 3), (default, 'Nicolle', '97531246810', 2), (default, 'Cristian', '82467391500', 1);
+insert into tb_Produto values (default, 'Água com gás', 1, now(), 1);
+insert into tb_Produto values (default, 'Fusca', 1, '2024-08-27', 2), (default, 'Ternaria', 0, '2024-07-15', 3), (default, 'Vodka', 0, '2024-09-10', 4), (default, 'Mangá', 1, '2024-05-12', 5);
+insert into tb_Vendas values (default, 1, 3, 3), (default, 5, 4, 4); 
+
+DELIMITER //
+-- Procedure para inserir dados na tabela de funcionários e conferir se aquele cpf já existe, também utilizando transaction para caso já exista
+CREATE PROCEDURE validarCPF (IN IDFuncionario INT, IN Nome Varchar(255), IN CPF Varchar(11), IN IDPermissao INT)
+BEGIN
+    START TRANSACTION;
+    BEGIN
+		-- Se não existir nenhum cpf igual ao passado como parâmetro, ele insere na tabela
+        IF NOT EXISTS (
+			SELECT * FROM tb_Funcionario  F where F.CPF = CPF
+        ) THEN
+            insert into tb_Funcionario values (default, IDFuncionario, Nome, CPF, IDPermissao);
+            COMMIT;
+		-- Se existir, ele causa um erro paras inpedir a inserção e passa a mensagem para o usuário
+        ELSE
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'CPF Repetido';
+            -- Depois reverte o que foi feito
+            ROLLBACK;
+        END IF;
+    END;
+END;
+//
+DELIMITER ;
+
+
+
+DELIMITER //
+-- Procedure para alterar a disponibilidade de um produto baseado no nível de um funcionário
+CREATE PROCEDURE alterarDisponibilidade (IN IDFuncionario INT, IN IDProduto INT)
+BEGIN
+	-- Criando duas variáveis, uma para pegar o nível do funcionário e outra para pegar a disponibilidade do produto
+	SET @NivelFuncionario =
+    (
+		SELECT
+			P.Nivel
+		FROM tb_Funcionario F
+		INNER JOIN tb_Permissao P
+		ON P.IDPermissao = F.IDPermissao
+        WHERE F.IDFuncionario = IDFuncionario
+    );
+    SET @Disponibilidade =
+    (
+		SELECT
+			Disponivel
+		FROM tb_Produto P
+        WHERE P.IDProduto = IDProduto
+    );
+    
+    -- Se o nivel do funcionário for maior que 2, ele pode alterar o estado
+    IF (@NivelFuncionario > 2) THEN
+		-- Se a disponibilidade for 1, ela se torna 0, a mesma coisa ao contrário
+		IF (@Disponibilidade = 1) THEN
+			UPDATE tb_Produto P SET Disponivel = 0 WHERE P.IDProduto = IDProduto;
+		ELSE
+			UPDATE tb_Produto P SET Disponivel = 1 WHERE P.IDProduto = IDProduto;
+		END IF;
+	END IF;
+END;
+//
+DELIMITER ;
+
+
+-- Procedure para ver se um funcionário tem permissão para alterar uma tabela
+DELIMITER //
+CREATE PROCEDURE alteracaoTabela (IN IDFuncionario INT, IN IDFuncionarioPermissao INT)
+BEGIN
+
+	-- Criando duas variáveis, uma para o nível do funcionário e outra para o nível do funcionário que dará a permissão
+	SET @NivelFuncionario =
+    (
+		SELECT
+			P.Nivel
+		FROM tb_Funcionario F
+		INNER JOIN tb_Permissao P
+		ON P.IDPermissao = F.IDPermissao
+        WHERE F.IDFuncionario = IDFuncionario
+    );
+    
+	SET @NivelFuncionarioPermissao =
+    (
+		SELECT
+			P.Nivel
+		FROM tb_Funcionario F
+		INNER JOIN tb_Permissao P
+		ON P.IDPermissao = F.IDPermissao
+        WHERE F.IDFuncionario = IDFuncionarioPermissao
+    );
+    
+    
+    START TRANSACTION;
+    BEGIN
+		-- Conferindo se o funcionário ou a pessoa autorizada tem nível maior que 5
+        IF (@NivelFuncionario > 5 OR @NivelFuncionarioPermissao > 5) THEN
+            insert into tb_Notificacao values (default, CONCAT('Funcionario de ID: ', IDFuncionario, 'tem permissão para alterar uma tabela.'));
+            COMMIT;
+		-- Se nenhum dos dois tiver, ele causa um erro e exibe a mensagem para o usuário
+        ELSE
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Funcionário não permitido para realizar essa operação!';
+            -- Depois reverte o que foi feito
+            ROLLBACK;
+        END IF;
+    END;
+END;
+//
+DELIMITER ;
+
+
+-- Procedure para conferir a data de inserção de um produto
+DELIMITER //
+CREATE PROCEDURE inserirProduto (IN IDProduto INT, IN Nome Varchar(255), IN Disponivel BIT, IN DataInsert DATETIME, IN IDFuncionario INT)
+BEGIN
+
+    START TRANSACTION;
+    BEGIN
+		-- Conferindo se a data de inserção é a mesma de hoje
+        IF (DataInsert = now()) THEN
+            insert into tb_Produto values (default, IDProduto, Nome, Disponivel, DataInsert, IDFuncionario);
+            COMMIT;
+		-- Se não for, ele lança o erro e uma mensagem
+        ELSE
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Data de inserção não é a mesma data de hoje!';
+            -- Depois reverte o que foi feito
+            ROLLBACK;
+        END IF;
+    END;
+END;
+//
+DELIMITER ;
+
+-- Procedure para impedir que algum atributo seja inserido como null na tabela funcionários
+DELIMITER //
+CREATE PROCEDURE insertFuncionario (IN IDFuncionario INT, IN Nome Varchar(255), IN CPF Varchar(11), IN IDPermissao INT)
+BEGIN
+    START TRANSACTION;
+    BEGIN
+		-- Conferindo se algum deles é iguala null, se for, ele lança o erro e não insere os dados
+        IF ((IDFuncionario = NULL) OR (Nome = NULL) OR (CPF = NULL) OR (IDPermissao = NULL)) THEN
+            SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Data de inserção não é a mesma data de hoje!';
+            ROLLBACK;
+		-- Se não for, ele insere normalmente
+        ELSE
+            insert into tb_Funcionario values (default, IDFuncionario, Nome, CPF, IDPermissao);
+            COMMIT;
+        END IF;
+    END;
+END;
+//
+DELIMITER ;
+
+
+DELIMITER //
+-- Procedure para bloquear uma venda caso a disponibilidade dela seja 0
+CREATE PROCEDURE insertVendas (IN Qtd INT, IN IDProduto INT, IN IDFuncionario INT)
+BEGIN
+	-- Criando uma variável com a disponibilidade do produto
+    SET @Disponibilidade =
+    (
+		SELECT
+			Disponivel
+		FROM tb_Produto P
+        WHERE P.IDProduto = IDProduto
+    );
+    
+	START TRANSACTION;
+    BEGIN
+		-- Se a disponibilidade for 1, pode vender, se não, um erro é lançado dizendo que não pode ser inserido
+		IF (@Disponibilidade = 1) THEN
+			INSERT INTO tb_Vendas VALUES (default, Qtd, IDProduto, IDFuncionario);
+            COMMIT;
+		ELSE
+			SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Data de inserção não é a mesma data de hoje!';
+            ROLLBACK;
+		END IF;
+    END;
+
+END;
+//
+DELIMITER ;
+
+
+
+	
